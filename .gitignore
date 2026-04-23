@@ -1,0 +1,22 @@
+# Swift / macOS build
+.build/
+dist/
+.DS_Store
+
+# Go backend
+backend/vendor/
+backend/.tmp/
+backend/vibeusage-backend
+
+# Dev scratch
+.tmp/
+
+# IDE
+.vscode/
+.idea/
+
+# Runtime-generated
+*.log
+.trellis
+.agents
+.codex
