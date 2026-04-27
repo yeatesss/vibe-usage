@@ -95,6 +95,10 @@ type codexEnvelope struct {
 
 type codexMetaPayload struct {
 	Model string `json:"model"`
+	Cwd   string `json:"cwd"`
+	Git   *struct {
+		Branch string `json:"branch"`
+	} `json:"git"`
 }
 
 // codexTokenCountInfo holds the per-turn / cumulative token usage.
@@ -180,8 +184,16 @@ func (*CodexParser) Parse(path string, state FileState) ([]Event, FileState, err
 
 		if env.Type == "turn_context" || env.Type == "session_meta" {
 			var mp codexMetaPayload
-			if err := json.Unmarshal(env.Payload, &mp); err == nil && mp.Model != "" {
-				currentModel = NormalizeModel(mp.Model)
+			if err := json.Unmarshal(env.Payload, &mp); err == nil {
+				if mp.Model != "" {
+					currentModel = NormalizeModel(mp.Model)
+				}
+				if mp.Cwd != "" {
+					next.Cwd = mp.Cwd
+				}
+				if mp.Git != nil && mp.Git.Branch != "" {
+					next.GitBranch = mp.Git.Branch
+				}
 			}
 			continue
 		}

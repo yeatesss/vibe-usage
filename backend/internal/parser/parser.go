@@ -20,6 +20,10 @@ type Event struct {
 
 // FileState is the parser's durable per-file state (serialized via log_files row).
 // SizeBytes = one past the last consumed '\n' byte (may be < stat.Size()).
+//
+// Cwd and GitBranch are project-level facts observed during parsing. They are
+// upserted into the sessions table by store.CommitFileParse. Empty values mean
+// "unknown" and won't overwrite a previously-known value.
 type FileState struct {
 	Path          string
 	Tool          string
@@ -27,6 +31,8 @@ type FileState struct {
 	MtimeUnix     int64
 	LastTotalJSON string // Codex only; empty for Claude
 	LastModel     string // Codex only
+	Cwd           string // project working directory (both tools)
+	GitBranch     string // git branch at session time (both tools)
 }
 
 // ToolParser: see spec §5.1 for contract. Implementers MUST:

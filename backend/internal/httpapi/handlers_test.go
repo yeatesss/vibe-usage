@@ -19,9 +19,12 @@ import (
 type fakeUsage struct {
 	res *usage.QueryResult
 	err error
+
+	gotProject string // captured for assertion in project-filter tests
 }
 
-func (f *fakeUsage) Query(tool, rangeName string) (*usage.QueryResult, error) {
+func (f *fakeUsage) Query(tool, rangeName, project string) (*usage.QueryResult, error) {
+	f.gotProject = project
 	return f.res, f.err
 }
 
@@ -31,6 +34,15 @@ type fakeHeatmap struct {
 }
 
 func (f *fakeHeatmap) Query(tool string, weeks int) (*usage.HeatmapResult, error) {
+	return f.res, f.err
+}
+
+type fakeProjects struct {
+	res *usage.ProjectsResult
+	err error
+}
+
+func (f *fakeProjects) List(tool, rangeName string) (*usage.ProjectsResult, error) {
 	return f.res, f.err
 }
 
@@ -62,14 +74,21 @@ func (f *fakeTick) SetTick(d time.Duration) error {
 func newRouter(usg UsageQuerier, hc HealthCheck, version string) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	RegisterRoutes(r, usg, &fakeHeatmap{}, hc, &fakeTick{cur: 30 * time.Second}, version)
+	RegisterRoutes(r, usg, &fakeHeatmap{}, &fakeProjects{}, hc, &fakeTick{cur: 30 * time.Second}, version)
+	return r
+}
+
+func newRouterWithProjects(usg UsageQuerier, pq ProjectsQuerier) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	RegisterRoutes(r, usg, &fakeHeatmap{}, pq, &fakeHealth{}, &fakeTick{cur: 30 * time.Second}, "test")
 	return r
 }
 
 func newRouterWithTick(tc TickConfigurer) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	RegisterRoutes(r, &fakeUsage{}, &fakeHeatmap{}, &fakeHealth{}, tc, "test")
+	RegisterRoutes(r, &fakeUsage{}, &fakeHeatmap{}, &fakeProjects{}, &fakeHealth{}, tc, "test")
 	return r
 }
 
@@ -175,6 +194,61 @@ func TestHandlers_PutTick_OutOfRange(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestHandlers_Usage_PassesProjectFilter(t *testing.T) {
+	usg := &fakeUsage{res: &usage.QueryResult{Tool: "claude", Range: "week"}}
+	r := newRouter(usg, &fakeHealth{}, "0.1.0")
+
+	req := httptest.NewRequest("GET", "/usage?tool=claude&range=week&project=/Users/me/proj-a", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "/Users/me/proj-a", usg.gotProject)
+}
+
+func TestHandlers_Usage_NoProjectIsPassedAsEmpty(t *testing.T) {
+	usg := &fakeUsage{res: &usage.QueryResult{Tool: "claude", Range: "week"}}
+	r := newRouter(usg, &fakeHealth{}, "0.1.0")
+
+	req := httptest.NewRequest("GET", "/usage?tool=claude&range=week", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "", usg.gotProject)
+}
+
+func TestHandlers_Projects_Valid(t *testing.T) {
+	pq := &fakeProjects{res: &usage.ProjectsResult{
+		Tool: "claude", Range: "month",
+		Projects: []usage.Project{
+			{Cwd: "/Users/me/proj-a", DisplayName: "proj-a", CostUSD: "12.34", TotalTokens: 1000},
+			{Cwd: "/Users/me/proj-b", DisplayName: "proj-b", CostUSD: "1.20", TotalTokens: 200},
+		},
+	}}
+	r := newRouterWithProjects(&fakeUsage{}, pq)
+
+	req := httptest.NewRequest("GET", "/usage/projects?tool=claude&range=month", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var body usage.ProjectsResult
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	assert.Len(t, body.Projects, 2)
+	assert.Equal(t, "proj-a", body.Projects[0].DisplayName)
+	assert.Equal(t, "12.34", body.Projects[0].CostUSD)
+}
+
+func TestHandlers_Projects_InvalidRange(t *testing.T) {
+	r := newRouterWithProjects(&fakeUsage{}, &fakeProjects{})
+
+	req := httptest.NewRequest("GET", "/usage/projects?tool=claude&range=decade", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 

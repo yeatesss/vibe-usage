@@ -3,38 +3,124 @@ import SwiftUI
 struct StatsView: View {
     @State private var tool: Tool = .claude
     @State private var range: Range = .week
+    /// View tab is persisted so reopening the dashboard restores the user's
+    /// last context. selectedProject is intentionally not persisted (per spec).
+    @AppStorage("statsViewMode") private var viewMode: StatsViewMode = .overview
     @ObservedObject private var locale = LocaleStore.shared
     @ObservedObject var store: UsageStore
     @Namespace private var animationNS
+    @FocusState private var windowFocused: Bool
 
-    private var snapshot: UsageSnapshot { store.snapshot(tool: tool, range: range) ?? .empty }
+    /// Snapshot scoped to the current selectedProject (nil ⇒ all projects).
+    /// Both the Overview chart and the subheader read from this so that
+    /// chip selection and master/detail selection share state.
+    private var snapshot: UsageSnapshot {
+        store.snapshot(tool: tool, range: range, project: store.selectedProject) ?? .empty
+    }
     private var metrics: UsageMetrics { snapshot.metrics }
     private var tabAnim: Animation { .spring(response: 0.38, dampingFraction: 0.85) }
     private var numAnim: Animation { .smooth(duration: 0.45) }
 
     private let dashboardHeatmapWeeks = 52
 
+    private var projectsSnapshot: ProjectsSnapshot {
+        store.projects(tool: tool, range: range) ?? .empty
+    }
+
+    private var selectedProjectModel: Project? {
+        guard let cwd = store.selectedProject else { return nil }
+        return projectsSnapshot.projects.first(where: { $0.cwd == cwd })
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             topBar
+            viewBar
             subHeader
-            ScrollView(.vertical, showsIndicators: false) {
-                VStack(spacing: 0) {
-                    HStack(alignment: .top, spacing: 0) {
-                        main
-                        Divider()
-                        sidebar
-                    }
-                    heatmapSection
-                }
-            }
+            content
         }
         .background(statsBackground)
         .foregroundStyle(Palette.ink)
+        .focusable()
+        .focused($windowFocused)
+        .focusEffectDisabled()
+        .onAppear { windowFocused = true }
+        .background(keyboardShortcutsHost)
         .task(id: tool.id) {
+            store.clearProjectSelection()
             await store.loadAll(tool: tool)
             await store.loadHeatmap(tool: tool, weeks: dashboardHeatmapWeeks)
+            await store.loadProjects(tool: tool, range: range)
         }
+        .task(id: range.id) {
+            await store.loadProjects(tool: tool, range: range)
+            // If a project is selected, also keep its snapshot fresh for the new range.
+            if let cwd = store.selectedProject {
+                await store.load(tool: tool, range: range, project: cwd)
+            }
+        }
+        .onChange(of: store.selectedProject) { _, newValue in
+            // When user picks a project (anywhere), preload its data for the
+            // currently visible range so charts swap in without a flicker.
+            if let cwd = newValue {
+                Task { await store.load(tool: tool, range: range, project: cwd) }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch viewMode {
+        case .overview:
+            overviewBody
+                .transition(.asymmetric(
+                    insertion: .opacity.combined(with: .move(edge: .leading)),
+                    removal: .opacity.combined(with: .move(edge: .trailing))
+                ))
+        case .projects:
+            projectsBody
+                .transition(.asymmetric(
+                    insertion: .opacity.combined(with: .move(edge: .trailing)),
+                    removal: .opacity.combined(with: .move(edge: .leading))
+                ))
+        }
+    }
+
+    private var overviewBody: some View {
+        ScrollView(.vertical, showsIndicators: false) {
+            VStack(spacing: 0) {
+                ProjectChipStrip(
+                    snapshot: projectsSnapshot,
+                    accent: tool.accent,
+                    selectedProject: Binding(
+                        get: { store.selectedProject },
+                        set: { store.selectedProject = $0 }
+                    ),
+                    onOpenProjectsView: {
+                        withAnimation(tabAnim) { viewMode = .projects }
+                    }
+                )
+                HStack(alignment: .top, spacing: 0) {
+                    main
+                    Divider()
+                    sidebar
+                }
+                heatmapSection
+            }
+        }
+    }
+
+    private var projectsBody: some View {
+        ProjectsMasterDetail(
+            tool: tool,
+            range: range,
+            snapshot: projectsSnapshot,
+            selectedProject: Binding(
+                get: { store.selectedProject },
+                set: { store.selectedProject = $0 }
+            ),
+            store: store
+        )
     }
 
     // MARK: Heatmap section (full width, below main + sidebar)
@@ -125,15 +211,73 @@ struct StatsView: View {
         .overlay(Rectangle().fill(Palette.ink.opacity(0.08)).frame(height: 1), alignment: .bottom)
     }
 
+    // MARK: View-tab bar (Overview / Projects)
+
+    private var viewBar: some View {
+        HStack(spacing: 0) {
+            ForEach(StatsViewMode.allCases) { mode in
+                Button {
+                    withAnimation(tabAnim) { viewMode = mode }
+                } label: {
+                    let label = mode == .overview
+                        ? L.t("viewOverview", locale: locale.current)
+                        : L.t("viewProjects", locale: locale.current)
+                    Text(label)
+                        .font(.system(size: 12.5, weight: .medium))
+                        .foregroundStyle(viewMode == mode ? Palette.ink : Palette.ink.opacity(0.55))
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 11)
+                        .overlay(alignment: .bottom) {
+                            if viewMode == mode {
+                                Rectangle()
+                                    .fill(tool.accent)
+                                    .frame(height: 2)
+                                    .padding(.horizontal, 14)
+                                    .matchedGeometryEffect(id: "viewBarUnderline", in: animationNS)
+                            }
+                        }
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            Spacer(minLength: 0)
+            scopeMeta
+                .padding(.trailing, 18)
+        }
+        .padding(.horizontal, 8)
+        .background(Color.white.opacity(0.18))
+        .overlay(Rectangle().fill(Palette.ink.opacity(0.08)).frame(height: 1), alignment: .bottom)
+    }
+
+    private var scopeMeta: some View {
+        let count = projectsSnapshot.projects.count
+        if let p = selectedProjectModel {
+            return Text(L.t("scopedProject", locale: locale.current,
+                            params: ["name": p.displayName]))
+                .font(.system(size: 11))
+                .foregroundStyle(Palette.ink.opacity(0.55))
+        } else {
+            return Text(L.t("scopedAll", locale: locale.current,
+                            params: ["n": "\(count)"]))
+                .font(.system(size: 11))
+                .foregroundStyle(Palette.ink.opacity(0.55))
+        }
+    }
+
     // MARK: Subheader — big number + range tabs
 
     private var subHeader: some View {
         HStack(alignment: .lastTextBaseline, spacing: 24) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(rangeSubtitle.uppercased())
-                    .font(.system(size: 11, weight: .semibold))
-                    .tracking(0.6)
-                    .foregroundStyle(Palette.ink.opacity(0.55))
+                HStack(spacing: 8) {
+                    Text(rangeSubtitle.uppercased())
+                        .font(.system(size: 11, weight: .semibold))
+                        .tracking(0.6)
+                        .foregroundStyle(Palette.ink.opacity(0.55))
+                    if let p = selectedProjectModel {
+                        scopeChipPill(p)
+                    }
+                }
                 HStack(alignment: .firstTextBaseline, spacing: 14) {
                     Text(String(format: "$%.2f", metrics.cost))
                         .font(.system(size: 32, weight: .semibold))
@@ -160,6 +304,58 @@ struct StatsView: View {
         }
         .padding(.horizontal, 22).padding(.vertical, 14)
         .overlay(Rectangle().fill(Palette.ink.opacity(0.08)).frame(height: 1), alignment: .bottom)
+    }
+
+    private func scopeChipPill(_ p: Project) -> some View {
+        HStack(spacing: 4) {
+            Circle().fill(tool.accent).frame(width: 5, height: 5)
+            Text(p.displayName)
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundStyle(tool.accent)
+                .lineLimit(1)
+            Button {
+                withAnimation(tabAnim) { store.selectedProject = nil }
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(tool.accent.opacity(0.7))
+                    .padding(2)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.leading, 6).padding(.trailing, 4).padding(.vertical, 2)
+        .background(
+            Capsule().fill(tool.accent.opacity(0.12))
+        )
+    }
+
+    // MARK: Keyboard shortcuts (⌘1 / ⌘2 / Esc)
+
+    /// Hidden buttons placed in `.background` so SwiftUI registers their
+    /// shortcuts even though they have no visible UI. Cheaper than wrapping
+    /// the whole window in `.commands`.
+    private var keyboardShortcutsHost: some View {
+        ZStack {
+            Button {
+                withAnimation(tabAnim) { viewMode = .overview }
+            } label: { EmptyView() }
+                .keyboardShortcut("1", modifiers: .command)
+                .opacity(0)
+            Button {
+                withAnimation(tabAnim) { viewMode = .projects }
+            } label: { EmptyView() }
+                .keyboardShortcut("2", modifiers: .command)
+                .opacity(0)
+            Button {
+                if store.selectedProject != nil {
+                    withAnimation(tabAnim) { store.selectedProject = nil }
+                }
+            } label: { EmptyView() }
+                .keyboardShortcut(.escape, modifiers: [])
+                .opacity(0)
+        }
+        .frame(width: 0, height: 0)
     }
 
     private var rangePicker: some View {

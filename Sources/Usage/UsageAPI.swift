@@ -70,17 +70,21 @@ final class UsageAPI: @unchecked Sendable {
         }
     }
 
-    func query(tool: Tool, range: Range) async throws -> UsageSnapshot {
+    func query(tool: Tool, range: Range, project: String = "") async throws -> UsageSnapshot {
         let info = try runtime()
         var c = URLComponents()
         c.scheme = "http"
         c.host = "127.0.0.1"
         c.port = info.port
         c.path = "/usage"
-        c.queryItems = [
+        var items = [
             URLQueryItem(name: "tool",  value: tool.rawValue),
             URLQueryItem(name: "range", value: range.rawValue),
         ]
+        if !project.isEmpty {
+            items.append(URLQueryItem(name: "project", value: project))
+        }
+        c.queryItems = items
         guard let url = c.url else { throw UsageAPIError.invalidURL }
 
         let data: Data
@@ -133,6 +137,40 @@ final class UsageAPI: @unchecked Sendable {
         }
         guard http.statusCode == 200 else {
             throw UsageAPIError.http(http.statusCode)
+        }
+    }
+
+    func projects(tool: Tool, range: Range) async throws -> ProjectsSnapshot {
+        let info = try runtime()
+        var c = URLComponents()
+        c.scheme = "http"
+        c.host = "127.0.0.1"
+        c.port = info.port
+        c.path = "/usage/projects"
+        c.queryItems = [
+            URLQueryItem(name: "tool",  value: tool.rawValue),
+            URLQueryItem(name: "range", value: range.rawValue),
+        ]
+        guard let url = c.url else { throw UsageAPIError.invalidURL }
+
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(from: url)
+        } catch {
+            throw UsageAPIError.transport(error)
+        }
+        guard let http = response as? HTTPURLResponse else {
+            throw UsageAPIError.http(-1)
+        }
+        guard http.statusCode == 200 else {
+            throw UsageAPIError.http(http.statusCode)
+        }
+        do {
+            let payload = try decoder.decode(BackendProjectsResult.self, from: data)
+            return payload.toSnapshot(tool: tool, range: range)
+        } catch {
+            throw UsageAPIError.decode(error)
         }
     }
 
@@ -218,6 +256,66 @@ private struct BackendQueryResult: Decodable {
             labels:   series.labels,
             sessions: sessions
         )
+    }
+}
+
+// MARK: - Backend projects payload (matches Go usage.ProjectsResult)
+
+private struct BackendProjectsResult: Decodable {
+    struct Row: Decodable {
+        let cwd: String
+        let displayName: String
+        let inputTokens: Int64
+        let outputTokens: Int64
+        let cacheReadTokens: Int64
+        let cacheWriteTokens: Int64
+        let totalTokens: Int64
+        let costUSD: String
+        let requests: Int64
+        let sessions: Int64
+        let gitBranches: [String]?
+        let lastActiveAt: String?
+        let firstActiveAt: String?
+
+        enum CodingKeys: String, CodingKey {
+            case cwd
+            case displayName     = "display_name"
+            case inputTokens     = "input_tokens"
+            case outputTokens    = "output_tokens"
+            case cacheReadTokens = "cache_read_tokens"
+            case cacheWriteTokens = "cache_write_tokens"
+            case totalTokens     = "total_tokens"
+            case costUSD         = "cost_usd"
+            case requests, sessions
+            case gitBranches     = "git_branches"
+            case lastActiveAt    = "last_active_at"
+            case firstActiveAt   = "first_active_at"
+        }
+    }
+    let tool: String
+    let range: String
+    let projects: [Row]?
+
+    func toSnapshot(tool: Tool, range: Range) -> ProjectsSnapshot {
+        let iso = ISO8601DateFormatter()
+        let mapped: [Project] = (projects ?? []).map { p in
+            Project(
+                cwd: p.cwd,
+                displayName: p.displayName.isEmpty ? "(unknown)" : p.displayName,
+                totalTokens: Double(p.totalTokens),
+                inputTokens: Double(p.inputTokens),
+                outputTokens: Double(p.outputTokens),
+                cacheReadTokens: Double(p.cacheReadTokens),
+                cacheWriteTokens: Double(p.cacheWriteTokens),
+                cost: Double(p.costUSD) ?? 0,
+                requests: Int(p.requests),
+                sessions: Int(p.sessions),
+                gitBranches: p.gitBranches ?? [],
+                lastActiveAt: p.lastActiveAt.flatMap { iso.date(from: $0) },
+                firstActiveAt: p.firstActiveAt.flatMap { iso.date(from: $0) }
+            )
+        }
+        return ProjectsSnapshot(tool: tool, range: range, projects: mapped)
     }
 }
 

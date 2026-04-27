@@ -64,6 +64,50 @@ struct UsageSnapshot {
     )
 }
 
+// MARK: - StatsViewMode
+
+/// Top-level sub-tab inside the Stats window. Tool & range live independently;
+/// see Sources/Usage/StatsView.swift §1 IA.
+enum StatsViewMode: String, CaseIterable, Identifiable {
+    case overview, projects
+    var id: String { rawValue }
+}
+
+// MARK: - Project
+
+/// One row of /usage/projects. `cwd` is the canonical id; empty means
+/// "(unknown)".
+struct Project: Identifiable, Hashable {
+    let cwd: String
+    let displayName: String
+    let totalTokens: Double
+    let inputTokens: Double
+    let outputTokens: Double
+    let cacheReadTokens: Double
+    let cacheWriteTokens: Double
+    let cost: Double
+    let requests: Int
+    let sessions: Int
+    let gitBranches: [String]
+    let lastActiveAt: Date?
+    let firstActiveAt: Date?
+
+    var id: String { cwd }
+    var isUnknown: Bool { cwd.isEmpty }
+}
+
+struct ProjectsSnapshot {
+    let tool: Tool
+    let range: Range
+    let projects: [Project]
+
+    static let empty = ProjectsSnapshot(tool: .claude, range: .month, projects: [])
+
+    var totalCost: Double { projects.reduce(0) { $0 + $1.cost } }
+    var totalTokens: Double { projects.reduce(0) { $0 + $1.totalTokens } }
+    var totalRequests: Int { projects.reduce(0) { $0 + $1.requests } }
+}
+
 // MARK: - Heatmap
 
 struct HeatmapDay: Identifiable {
@@ -221,6 +265,30 @@ enum L {
         // Settings — about
         "version": "Version",
         "done": "Done",
+
+        // Projects feature
+        "viewOverview": "Overview",
+        "viewProjects": "Projects",
+        "scopedAll": "{n} projects",
+        "scopedProject": "Filtered: {name}",
+        "allProjects": "All · {n}",
+        "allProjectsTitle": "All projects",
+        "pickAProject": "Pick a project to drill in",
+        "pickAProjectHint": "Select on the left to see per-project token usage, cost trend and branch breakdown.",
+        "searchProjects": "Search projects…",
+        "byCost": "Cost",
+        "byTokens": "Tokens",
+        "byRequests": "Requests",
+        "byRecent": "Recent",
+        "byName": "Name",
+        "noProjectsInRange": "No projects in this range",
+        "noMatchingProjects": "No matching projects.\nTry another keyword.",
+        "unknownProject": "(unknown)",
+        "inactive": "Inactive",
+        "branches": "Branches",
+        "sessionsLabel": "Sessions",
+        "lastActive": "Last active {t}",
+        "loadingChart": "Loading chart…",
     ]
 
     static let zh: [String: String] = [
@@ -303,6 +371,30 @@ enum L {
         // Settings — about
         "version": "版本",
         "done": "完成",
+
+        // Projects feature
+        "viewOverview": "概览",
+        "viewProjects": "项目",
+        "scopedAll": "{n} 个项目",
+        "scopedProject": "已筛选：{name}",
+        "allProjects": "全部 · {n}",
+        "allProjectsTitle": "全部项目",
+        "pickAProject": "选择一个项目以查看详情",
+        "pickAProjectHint": "在左侧选中后，可看到该项目的 token 使用、费用趋势与分支拆解。",
+        "searchProjects": "搜索项目…",
+        "byCost": "按花费",
+        "byTokens": "按 Token",
+        "byRequests": "按请求",
+        "byRecent": "按最近活跃",
+        "byName": "按名称",
+        "noProjectsInRange": "当前周期内无项目",
+        "noMatchingProjects": "无匹配项目\n试试其他关键词",
+        "unknownProject": "(未识别)",
+        "inactive": "未活跃",
+        "branches": "分支",
+        "sessionsLabel": "会话",
+        "lastActive": "最近活跃 {t}",
+        "loadingChart": "正在加载…",
     ]
 }
 

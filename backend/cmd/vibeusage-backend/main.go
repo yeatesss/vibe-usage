@@ -105,10 +105,11 @@ func run() int {
 	clock := usage.NewWallClock()
 	usgSvc := usage.NewService(st, calc, clock)
 	heatSvc := usage.NewHeatmapService(st, calc, clock)
+	projSvc := usage.NewProjectsService(st, calc, clock)
 	startedAt := time.Now().In(usage.Location())
 	hc := &healthCheck{startedAt: startedAt, store: st, ingest: ing}
 
-	router := httpapi.NewRouter(usgSvc, heatSvc, hc, ing, version)
+	router := httpapi.NewRouter(usgSvc, heatSvc, projSvc, hc, ing, version)
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		logger.Error("listen", "err", err)

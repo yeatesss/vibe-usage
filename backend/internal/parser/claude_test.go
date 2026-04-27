@@ -40,6 +40,11 @@ func TestClaudeParse_Sample(t *testing.T) {
 
 	assert.Equal(t, fi.Size(), next.SizeBytes)
 	assert.Equal(t, fi.ModTime().Unix(), next.MtimeUnix)
+
+	// Project-level facts propagate from the jsonl into FileState so the
+	// store can upsert the sessions row alongside log_files.
+	assert.Equal(t, "/Users/test/myproj", next.Cwd)
+	assert.Equal(t, "main", next.GitBranch)
 }
 
 func TestClaudeParse_Resume(t *testing.T) {

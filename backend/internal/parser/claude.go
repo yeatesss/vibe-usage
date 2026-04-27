@@ -43,6 +43,8 @@ func (*ClaudeParser) Walk(cfg Config) ([]string, error) {
 
 type claudeLine struct {
 	Timestamp string `json:"timestamp"`
+	Cwd       string `json:"cwd"`
+	GitBranch string `json:"gitBranch"`
 	Message   struct {
 		Model string `json:"model"`
 		Usage *struct {
@@ -54,7 +56,10 @@ type claudeLine struct {
 	} `json:"message"`
 }
 
-var usageMarker = []byte(`"usage"`)
+var (
+	usageMarker = []byte(`"usage"`)
+	cwdMarker   = []byte(`"cwd"`)
+)
 
 func (*ClaudeParser) Parse(path string, state FileState) ([]Event, FileState, error) {
 	next := state
@@ -96,14 +101,27 @@ func (*ClaudeParser) Parse(path string, state FileState) ([]Event, FileState, er
 		lineStart := cur
 		cur += int64(len(line))
 
-		if !bytes.Contains(line, usageMarker) {
+		hasUsage := bytes.Contains(line, usageMarker)
+		hasCwd := bytes.Contains(line, cwdMarker)
+		if !hasUsage && !hasCwd {
 			continue
 		}
+
 		var obj claudeLine
 		if err := json.Unmarshal(line, &obj); err != nil {
 			continue
 		}
-		if obj.Message.Usage == nil || obj.Timestamp == "" {
+
+		// Pick up project-level facts as soon as we see them. Use the latest
+		// non-empty value within this scan so a moved/renamed checkout updates.
+		if obj.Cwd != "" {
+			next.Cwd = obj.Cwd
+		}
+		if obj.GitBranch != "" {
+			next.GitBranch = obj.GitBranch
+		}
+
+		if !hasUsage || obj.Message.Usage == nil || obj.Timestamp == "" {
 			continue
 		}
 		ts, err := time.Parse(time.RFC3339Nano, obj.Timestamp)

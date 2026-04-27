@@ -13,11 +13,16 @@ import (
 )
 
 type UsageQuerier interface {
-	Query(tool, rangeName string) (*usage.QueryResult, error)
+	Query(tool, rangeName, project string) (*usage.QueryResult, error)
 }
 
 type HeatmapQuerier interface {
 	Query(tool string, weeks int) (*usage.HeatmapResult, error)
+}
+
+// ProjectsQuerier returns the per-project aggregation for a tool/range.
+type ProjectsQuerier interface {
+	List(tool, rangeName string) (*usage.ProjectsResult, error)
 }
 
 type HealthCheck interface {
@@ -34,10 +39,10 @@ type TickConfigurer interface {
 }
 
 // NewRouter creates a gin.Engine with all routes registered.
-func NewRouter(usg UsageQuerier, hm HeatmapQuerier, hc HealthCheck, tc TickConfigurer, version string) *gin.Engine {
+func NewRouter(usg UsageQuerier, hm HeatmapQuerier, pq ProjectsQuerier, hc HealthCheck, tc TickConfigurer, version string) *gin.Engine {
 	r := gin.New()
 	r.Use(gin.Recovery())
-	RegisterRoutes(r, usg, hm, hc, tc, version)
+	RegisterRoutes(r, usg, hm, pq, hc, tc, version)
 	return r
 }
 

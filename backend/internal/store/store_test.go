@@ -22,17 +22,17 @@ func TestOpen_CreatesSchemaAndSeedsPricing(t *testing.T) {
 	assert.Equal(t, 9, n)
 
 	// schema tables present
-	for _, tbl := range []string{"usage_events", "log_files", "pricing_profiles", "metadata"} {
+	for _, tbl := range []string{"usage_events", "log_files", "pricing_profiles", "metadata", "sessions"} {
 		var name string
 		err := st.DB().QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name=?", tbl).Scan(&name)
 		require.NoError(t, err, "table %s missing", tbl)
 		assert.Equal(t, tbl, name)
 	}
 
-	// user_version bumped
+	// user_version bumped to the latest migration number.
 	var uv int
 	require.NoError(t, st.DB().QueryRow("PRAGMA user_version").Scan(&uv))
-	assert.Equal(t, 1, uv)
+	assert.Equal(t, 2, uv)
 }
 
 func TestOpen_Idempotent(t *testing.T) {

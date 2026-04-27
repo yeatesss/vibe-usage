@@ -10,10 +10,17 @@ import (
 )
 
 // Reader is the narrow store interface usage depends on (ISP + DIP).
+//
+// The *ForProject variants restrict aggregation to a single project (cwd) by
+// joining usage_events with the sessions table. They are only consulted when
+// the caller passes a non-empty project filter to Query.
 type Reader interface {
 	SumByModel(tool string, startUTC, endUTC int64) ([]store.ModelTokenSum, error)
+	SumByModelForProject(tool, project string, startUTC, endUTC int64) ([]store.ModelTokenSum, error)
 	TotalInRange(tool string, startUTC, endUTC int64) (int64, error)
+	TotalInRangeForProject(tool, project string, startUTC, endUTC int64) (int64, error)
 	DistinctSessions(tool string, startUTC, endUTC int64) (int, error)
+	DistinctSessionsForProject(tool, project string, startUTC, endUTC int64) (int, error)
 }
 
 type Service struct {
@@ -45,6 +52,7 @@ type Series struct {
 type QueryResult struct {
 	Tool       string  `json:"tool"`
 	Range      string  `json:"range"`
+	Project    string  `json:"project,omitempty"` // cwd filter, empty when "all projects"
 	RangeStart string  `json:"range_start"`
 	RangeEnd   string  `json:"range_end"`
 	Bucket     Bucket  `json:"bucket"`
@@ -53,7 +61,9 @@ type QueryResult struct {
 	Series     Series  `json:"series"`
 }
 
-func (s *Service) Query(tool, rangeName string) (*QueryResult, error) {
+// Query aggregates usage for the given tool/range. When project is non-empty,
+// results are filtered to events from sessions whose cwd matches.
+func (s *Service) Query(tool, rangeName, project string) (*QueryResult, error) {
 	rb, err := BoundariesFor(rangeName, s.clock)
 	if err != nil {
 		return nil, err
@@ -62,7 +72,12 @@ func (s *Service) Query(tool, rangeName string) (*QueryResult, error) {
 	startUTC := rb.Start.UTC().Unix()
 	endUTC := rb.End.UTC().Unix()
 
-	sums, err := s.reader.SumByModel(tool, startUTC, endUTC)
+	var sums []store.ModelTokenSum
+	if project == "" {
+		sums, err = s.reader.SumByModel(tool, startUTC, endUTC)
+	} else {
+		sums, err = s.reader.SumByModelForProject(tool, project, startUTC, endUTC)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("sum by model: %w", err)
 	}
@@ -87,7 +102,12 @@ func (s *Service) Query(tool, rangeName string) (*QueryResult, error) {
 	m.TotalTokens = m.InputTokens + m.OutputTokens + m.CacheReadTokens + m.CacheWriteTokens
 	m.CostUSD = cost.StringFixed(2)
 
-	sessions, err := s.reader.DistinctSessions(tool, startUTC, endUTC)
+	var sessions int
+	if project == "" {
+		sessions, err = s.reader.DistinctSessions(tool, startUTC, endUTC)
+	} else {
+		sessions, err = s.reader.DistinctSessionsForProject(tool, project, startUTC, endUTC)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("distinct sessions: %w", err)
 	}
@@ -96,7 +116,12 @@ func (s *Service) Query(tool, rangeName string) (*QueryResult, error) {
 	labels := make([]string, rb.BucketCount)
 	for i, b := range rb.Buckets {
 		labels[i] = b.Label
-		total, err := s.reader.TotalInRange(tool, b.StartUTC, b.EndUTC)
+		var total int64
+		if project == "" {
+			total, err = s.reader.TotalInRange(tool, b.StartUTC, b.EndUTC)
+		} else {
+			total, err = s.reader.TotalInRangeForProject(tool, project, b.StartUTC, b.EndUTC)
+		}
 		if err != nil {
 			return nil, fmt.Errorf("series bucket %d: %w", i, err)
 		}
@@ -106,6 +131,7 @@ func (s *Service) Query(tool, rangeName string) (*QueryResult, error) {
 	return &QueryResult{
 		Tool:       tool,
 		Range:      rangeName,
+		Project:    project,
 		RangeStart: rb.Start.Format("2006-01-02T15:04:05-07:00"),
 		RangeEnd:   rb.End.Format("2006-01-02T15:04:05-07:00"),
 		Bucket:     rb.Bucket,

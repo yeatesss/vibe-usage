@@ -11,9 +11,13 @@ import (
 func TestCodexParse_Sample(t *testing.T) {
 	p := NewCodexParser()
 	path := "testdata/codex/rollout.jsonl"
-	events, _, err := p.Parse(path, FileState{Path: path, Tool: "codex"})
+	events, next, err := p.Parse(path, FileState{Path: path, Tool: "codex"})
 	require.NoError(t, err)
 	require.Len(t, events, 4)
+
+	// session_meta carries cwd and git.branch for the sessions table.
+	assert.Equal(t, "~/coding/foo", next.Cwd)
+	assert.Equal(t, "dev", next.GitBranch)
 
 	assert.Equal(t, int64(100), events[0].InputTokens)
 	assert.Equal(t, int64(10), events[0].CacheReadTokens)

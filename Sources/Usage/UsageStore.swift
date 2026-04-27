@@ -3,11 +3,19 @@ import SwiftUI
 
 @MainActor
 final class UsageStore: ObservableObject {
-    @Published private(set) var snapshots: [Tool: [Range: UsageSnapshot]] = [:]
+    /// snapshots[tool][project][range] — empty project key "" = "all projects".
+    /// Project-specific data is loaded on demand when selectedProject changes.
+    @Published private(set) var snapshots: [Tool: [String: [Range: UsageSnapshot]]] = [:]
     @Published private(set) var heatmaps: [Tool: [Int: HeatmapSnapshot]] = [:]
+    @Published private(set) var projectLists: [Tool: [Range: ProjectsSnapshot]] = [:]
     @Published private(set) var lastError: String?
     @Published private(set) var lastSyncedAt: Date?
     @Published private(set) var loading: Set<String> = []
+
+    /// The currently focused project (cwd). nil = "All". Shared between
+    /// the Overview chip strip and the Projects master/detail view; cleared
+    /// on tool change.
+    @Published var selectedProject: String? = nil
 
     private let api: UsageAPI
 
@@ -15,41 +23,74 @@ final class UsageStore: ObservableObject {
         self.api = api
     }
 
-    func snapshot(tool: Tool, range: Range) -> UsageSnapshot? {
-        snapshots[tool]?[range]
+    /// Returns the snapshot for the currently-active project filter.
+    /// If `project` is nil it falls back to the all-projects snapshot.
+    func snapshot(tool: Tool, range: Range, project: String? = nil) -> UsageSnapshot? {
+        snapshots[tool]?[project ?? ""]?[range]
     }
 
     func heatmap(tool: Tool, weeks: Int) -> HeatmapSnapshot? {
         heatmaps[tool]?[weeks]
     }
 
+    func projects(tool: Tool, range: Range) -> ProjectsSnapshot? {
+        projectLists[tool]?[range]
+    }
+
     func cost(tool: Tool, range: Range) -> Double {
         snapshot(tool: tool, range: range)?.metrics.cost ?? 0
     }
 
-    func loadAll(tool: Tool) async {
+    /// Reset selection and project caches when the user switches tools, since
+    /// each tool has its own project set.
+    func clearProjectSelection() {
+        selectedProject = nil
+    }
+
+    func loadAll(tool: Tool, project: String? = nil) async {
         await withTaskGroup(of: Void.self) { group in
             for r in Range.allCases {
-                group.addTask { await self.load(tool: tool, range: r) }
+                group.addTask { await self.load(tool: tool, range: r, project: project) }
             }
         }
     }
 
-    func load(tool: Tool, range: Range) async {
-        let key = "\(tool.rawValue)-\(range.rawValue)"
+    func load(tool: Tool, range: Range, project: String? = nil) async {
+        let projectKey = project ?? ""
+        let key = "\(tool.rawValue)-\(range.rawValue)-\(projectKey)"
         loading.insert(key)
         defer { loading.remove(key) }
         do {
-            let snap = try await api.query(tool: tool, range: range)
-            var perRange = snapshots[tool] ?? [:]
-            perRange[range] = snap
-            snapshots[tool] = perRange
+            let snap = try await api.query(tool: tool, range: range, project: projectKey)
+            var perTool = snapshots[tool] ?? [:]
+            var perProject = perTool[projectKey] ?? [:]
+            perProject[range] = snap
+            perTool[projectKey] = perProject
+            snapshots[tool] = perTool
             lastError = nil
             lastSyncedAt = Date()
         } catch {
             let msg = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             lastError = msg
-            FileHandle.standardError.write(Data("[UsageStore] \(tool.rawValue)/\(range.rawValue): \(msg)\n".utf8))
+            FileHandle.standardError.write(Data("[UsageStore] \(tool.rawValue)/\(range.rawValue)/\(projectKey): \(msg)\n".utf8))
+        }
+    }
+
+    func loadProjects(tool: Tool, range: Range) async {
+        let key = "projects-\(tool.rawValue)-\(range.rawValue)"
+        loading.insert(key)
+        defer { loading.remove(key) }
+        do {
+            let snap = try await api.projects(tool: tool, range: range)
+            var perRange = projectLists[tool] ?? [:]
+            perRange[range] = snap
+            projectLists[tool] = perRange
+            lastError = nil
+            lastSyncedAt = Date()
+        } catch {
+            let msg = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            lastError = msg
+            FileHandle.standardError.write(Data("[UsageStore] projects \(tool.rawValue)/\(range.rawValue): \(msg)\n".utf8))
         }
     }
 

@@ -8,8 +8,9 @@ import (
 )
 
 type usageQuery struct {
-	Tool  string `form:"tool" binding:"required,oneof=claude codex"`
-	Range string `form:"range" binding:"required,oneof=today week month year"`
+	Tool    string `form:"tool" binding:"required,oneof=claude codex"`
+	Range   string `form:"range" binding:"required,oneof=today week month year"`
+	Project string `form:"project"` // optional cwd filter; "" means "all projects"
 }
 
 type heatmapQuery struct {
@@ -17,11 +18,16 @@ type heatmapQuery struct {
 	Weeks int    `form:"weeks"`
 }
 
+type projectsQuery struct {
+	Tool  string `form:"tool" binding:"required,oneof=claude codex"`
+	Range string `form:"range" binding:"required,oneof=today week month year"`
+}
+
 type tickBody struct {
 	Tick string `json:"tick" binding:"required"`
 }
 
-func RegisterRoutes(r *gin.Engine, usg UsageQuerier, hm HeatmapQuerier, hc HealthCheck, tc TickConfigurer, version string) {
+func RegisterRoutes(r *gin.Engine, usg UsageQuerier, hm HeatmapQuerier, pq ProjectsQuerier, hc HealthCheck, tc TickConfigurer, version string) {
 	r.GET("/usage", func(c *gin.Context) {
 		var q usageQuery
 		if err := c.ShouldBindQuery(&q); err != nil {
@@ -31,7 +37,7 @@ func RegisterRoutes(r *gin.Engine, usg UsageQuerier, hm HeatmapQuerier, hc Healt
 			})
 			return
 		}
-		res, err := usg.Query(q.Tool, q.Range)
+		res, err := usg.Query(q.Tool, q.Range, q.Project)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal", "detail": err.Error()})
 			return
@@ -49,6 +55,23 @@ func RegisterRoutes(r *gin.Engine, usg UsageQuerier, hm HeatmapQuerier, hc Healt
 			return
 		}
 		res, err := hm.Query(q.Tool, q.Weeks)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal", "detail": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, res)
+	})
+
+	r.GET("/usage/projects", func(c *gin.Context) {
+		var q projectsQuery
+		if err := c.ShouldBindQuery(&q); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error":  "invalid parameter",
+				"detail": err.Error(),
+			})
+			return
+		}
+		res, err := pq.List(q.Tool, q.Range)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal", "detail": err.Error()})
 			return

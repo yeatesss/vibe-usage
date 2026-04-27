@@ -21,6 +21,7 @@ Everything runs locally. No account, no API keys, no network calls beyond `local
 
 - **Menu bar popover** — at-a-glance totals for today / this week / this month / this year.
 - **Full stats window** — hourly & daily bar charts, token breakdown (input, output, cache read, cache write), per-request averages, cost trends.
+- **Per-project view** — switch between Overview and Projects tabs; filter the dashboard with one click via the project chip strip, or drill into a single repo for cost, tokens, requests and per-branch breakdown.
 - **Dual tool support** — switch between Claude Code and Codex; see per-tool pricing (`$3/$15 per 1M` for Claude, `$1.25/$10 per 1M` for Codex) with cache discounts applied.
 - **Incremental ingestion** — the Go backend watches log files and only processes the delta since last tick.
 - **Self-contained `.app`** — the Swift UI bundles the Go backend binary; there is nothing to install separately.

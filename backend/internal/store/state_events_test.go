@@ -100,6 +100,98 @@ func TestCommitFileParse_CodexStateFields(t *testing.T) {
 	assert.Equal(t, "gpt-5.2-codex", got.LastModel)
 }
 
+func TestCommitFileParse_UpsertsSessionRow(t *testing.T) {
+	st := newTestStore(t)
+
+	ts1 := time.Date(2026, 4, 22, 10, 0, 0, 0, time.UTC)
+	ts2 := time.Date(2026, 4, 22, 10, 5, 0, 0, time.UTC)
+	events := []parser.Event{
+		{TsUTC: ts1, Tool: "claude", Model: "m",
+			InputTokens: 100, SourceFile: "/logs/a.jsonl", SourceOffset: 0},
+		{TsUTC: ts2, Tool: "claude", Model: "m",
+			InputTokens: 200, SourceFile: "/logs/a.jsonl", SourceOffset: 100},
+	}
+	state := parser.FileState{
+		Path: "/logs/a.jsonl", Tool: "claude",
+		SizeBytes: 500, MtimeUnix: 1,
+		Cwd: "/Users/me/proj-a", GitBranch: "main",
+	}
+	require.NoError(t, st.CommitFileParse(state, events))
+
+	var cwd, branch string
+	var first, last int64
+	require.NoError(t, st.DB().QueryRow(
+		"SELECT cwd, git_branch, first_ts_utc, last_ts_utc FROM sessions WHERE source_file=?",
+		"/logs/a.jsonl",
+	).Scan(&cwd, &branch, &first, &last))
+	assert.Equal(t, "/Users/me/proj-a", cwd)
+	assert.Equal(t, "main", branch)
+	assert.Equal(t, ts1.Unix(), first)
+	assert.Equal(t, ts2.Unix(), last)
+}
+
+func TestCommitFileParse_SessionPreservesCwdWhenLaterScanIsEmpty(t *testing.T) {
+	st := newTestStore(t)
+
+	ts1 := time.Date(2026, 4, 22, 10, 0, 0, 0, time.UTC)
+	first := parser.FileState{
+		Path: "/logs/a.jsonl", Tool: "claude",
+		SizeBytes: 100, MtimeUnix: 1,
+		Cwd: "/Users/me/proj-a", GitBranch: "main",
+	}
+	require.NoError(t, st.CommitFileParse(first, []parser.Event{
+		{TsUTC: ts1, Tool: "claude", Model: "m", InputTokens: 1,
+			SourceFile: "/logs/a.jsonl", SourceOffset: 0},
+	}))
+
+	// A subsequent partial scan that didn't observe any meta line — empty
+	// strings must NOT wipe what the previous scan recorded.
+	require.NoError(t, st.CommitFileParse(parser.FileState{
+		Path: "/logs/a.jsonl", Tool: "claude",
+		SizeBytes: 200, MtimeUnix: 2,
+	}, nil))
+
+	var cwd, branch string
+	require.NoError(t, st.DB().QueryRow(
+		"SELECT cwd, git_branch FROM sessions WHERE source_file=?", "/logs/a.jsonl",
+	).Scan(&cwd, &branch))
+	assert.Equal(t, "/Users/me/proj-a", cwd)
+	assert.Equal(t, "main", branch)
+}
+
+func TestCommitFileParse_SessionWidensTimeRange(t *testing.T) {
+	st := newTestStore(t)
+
+	mid := time.Date(2026, 4, 22, 10, 30, 0, 0, time.UTC)
+	require.NoError(t, st.CommitFileParse(
+		parser.FileState{Path: "/logs/a.jsonl", Tool: "claude",
+			SizeBytes: 100, MtimeUnix: 1, Cwd: "/p"},
+		[]parser.Event{{TsUTC: mid, Tool: "claude", Model: "m",
+			InputTokens: 1, SourceFile: "/logs/a.jsonl", SourceOffset: 0}},
+	))
+
+	earlier := mid.Add(-time.Hour)
+	later := mid.Add(time.Hour)
+	require.NoError(t, st.CommitFileParse(
+		parser.FileState{Path: "/logs/a.jsonl", Tool: "claude",
+			SizeBytes: 200, MtimeUnix: 2, Cwd: "/p"},
+		[]parser.Event{
+			{TsUTC: earlier, Tool: "claude", Model: "m", InputTokens: 1,
+				SourceFile: "/logs/a.jsonl", SourceOffset: 100},
+			{TsUTC: later, Tool: "claude", Model: "m", InputTokens: 1,
+				SourceFile: "/logs/a.jsonl", SourceOffset: 200},
+		},
+	))
+
+	var first, last int64
+	require.NoError(t, st.DB().QueryRow(
+		"SELECT first_ts_utc, last_ts_utc FROM sessions WHERE source_file=?",
+		"/logs/a.jsonl",
+	).Scan(&first, &last))
+	assert.Equal(t, earlier.Unix(), first)
+	assert.Equal(t, later.Unix(), last)
+}
+
 func TestSumByModel_AndSessions(t *testing.T) {
 	st := newTestStore(t)
 	ts := time.Date(2026, 4, 22, 10, 0, 0, 0, time.UTC).Unix()
