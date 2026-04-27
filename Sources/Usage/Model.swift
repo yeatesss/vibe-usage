@@ -64,6 +64,33 @@ struct UsageSnapshot {
     )
 }
 
+// MARK: - Heatmap
+
+struct HeatmapDay: Identifiable {
+    let id: String   // date, unique within snapshot
+    let date: Date
+    let weekday: Int // Monday=0..Sunday=6
+    let totalTokens: Double
+    let cost: Double
+    let requests: Int
+    let isFuture: Bool
+}
+
+struct HeatmapSnapshot {
+    let weeks: Int
+    let startDate: Date
+    let endDate: Date
+    let today: Date
+    let days: [HeatmapDay]
+
+    static let empty = HeatmapSnapshot(
+        weeks: 0, startDate: .distantPast, endDate: .distantPast, today: .distantPast, days: []
+    )
+
+    var maxCost: Double { days.map(\.cost).max() ?? 0 }
+    var maxTokens: Double { days.map(\.totalTokens).max() ?? 0 }
+}
+
 // MARK: - Number formatting
 
 enum Fmt {
@@ -135,7 +162,6 @@ enum L {
         "year": "Year",
         "openDashboard": "Open full dashboard",
         "exportCsv": "Export CSV…",
-        "budgets": "Budgets & alerts",
         "preferences": "Preferences…",
         "quit": "Quit VibeUsage",
         "language": "Language",
@@ -154,6 +180,47 @@ enum L {
         "avgTokensPerReq": "Avg tokens / req",
         "avgCostPerReq": "Avg cost / req",
         "total": "Total",
+        "activity": "Activity",
+        "activitySub": "Last {weeks} weeks · daily cost",
+        "less": "Less",
+        "more": "More",
+
+        // Settings — sections
+        "settings": "Settings",
+        "general": "General",
+        "appearance": "Appearance",
+        "dataSources": "Data sources",
+        "about": "About",
+
+        // Settings — general
+        "languageDesc": "Interface language",
+        "refreshInterval": "Refresh interval",
+        "every30s": "Every 30 seconds",
+        "every1m": "Every minute",
+        "every5m": "Every 5 minutes",
+        "startup": "Launch at login",
+        "startupDesc": "Open VibeUsage when you log in",
+
+        // Settings — appearance
+        "menuBarDisplay": "Menu bar display",
+        "displayIconOnly": "Icon only",
+        "displayTodayCost": "Today\u{2019}s cost",
+        "displayTokens": "Token count",
+        "theme": "Theme",
+        "themeSystem": "System",
+        "themeLight": "Light",
+        "themeDark": "Dark",
+
+        // Settings — data sources
+        "claudeCli": "Claude Code CLI",
+        "codexCli": "Codex CLI",
+        "connected": "Connected",
+        "notConfigured": "Not configured",
+        "configure": "Configure…",
+
+        // Settings — about
+        "version": "Version",
+        "done": "Done",
     ]
 
     static let zh: [String: String] = [
@@ -177,7 +244,6 @@ enum L {
         "year": "本年",
         "openDashboard": "打开完整面板",
         "exportCsv": "导出 CSV…",
-        "budgets": "预算与提醒",
         "preferences": "偏好设置…",
         "quit": "退出 VibeUsage",
         "language": "语言",
@@ -196,6 +262,47 @@ enum L {
         "avgTokensPerReq": "平均 Token / 次请求",
         "avgCostPerReq": "平均花费 / 次请求",
         "total": "合计",
+        "activity": "活跃度",
+        "activitySub": "过去 {weeks} 周 · 每日花费",
+        "less": "少",
+        "more": "多",
+
+        // Settings — sections
+        "settings": "设置",
+        "general": "通用",
+        "appearance": "外观",
+        "dataSources": "数据源",
+        "about": "关于",
+
+        // Settings — general
+        "languageDesc": "界面语言",
+        "refreshInterval": "刷新间隔",
+        "every30s": "每 30 秒",
+        "every1m": "每分钟",
+        "every5m": "每 5 分钟",
+        "startup": "开机启动",
+        "startupDesc": "登录时自动启动 VibeUsage",
+
+        // Settings — appearance
+        "menuBarDisplay": "菜单栏显示",
+        "displayIconOnly": "仅图标",
+        "displayTodayCost": "今日花费",
+        "displayTokens": "Token 数",
+        "theme": "主题",
+        "themeSystem": "跟随系统",
+        "themeLight": "浅色",
+        "themeDark": "深色",
+
+        // Settings — data sources
+        "claudeCli": "Claude Code CLI",
+        "codexCli": "Codex CLI",
+        "connected": "已连接",
+        "notConfigured": "未配置",
+        "configure": "配置…",
+
+        // Settings — about
+        "version": "版本",
+        "done": "完成",
     ]
 }
 

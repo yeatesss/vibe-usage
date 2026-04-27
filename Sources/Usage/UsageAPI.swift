@@ -103,6 +103,72 @@ final class UsageAPI: @unchecked Sendable {
             throw UsageAPIError.decode(error)
         }
     }
+
+    /// PUTs the desired ingest scan interval to the backend so file scanning
+    /// stays in sync with the user's "Refresh interval" preference.
+    func setBackendTick(seconds: TimeInterval) async throws {
+        let info = try runtime()
+        var c = URLComponents()
+        c.scheme = "http"
+        c.host = "127.0.0.1"
+        c.port = info.port
+        c.path = "/config/tick"
+        guard let url = c.url else { throw UsageAPIError.invalidURL }
+
+        var req = URLRequest(url: url)
+        req.httpMethod = "PUT"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        // Go duration format ("30s", "60s", "300s") — matches time.ParseDuration.
+        let body = try JSONSerialization.data(withJSONObject: ["tick": "\(Int(seconds))s"])
+        req.httpBody = body
+
+        let response: URLResponse
+        do {
+            (_, response) = try await session.data(for: req)
+        } catch {
+            throw UsageAPIError.transport(error)
+        }
+        guard let http = response as? HTTPURLResponse else {
+            throw UsageAPIError.http(-1)
+        }
+        guard http.statusCode == 200 else {
+            throw UsageAPIError.http(http.statusCode)
+        }
+    }
+
+    func heatmap(tool: Tool, weeks: Int) async throws -> HeatmapSnapshot {
+        let info = try runtime()
+        var c = URLComponents()
+        c.scheme = "http"
+        c.host = "127.0.0.1"
+        c.port = info.port
+        c.path = "/usage/heatmap"
+        c.queryItems = [
+            URLQueryItem(name: "tool",  value: tool.rawValue),
+            URLQueryItem(name: "weeks", value: String(weeks)),
+        ]
+        guard let url = c.url else { throw UsageAPIError.invalidURL }
+
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(from: url)
+        } catch {
+            throw UsageAPIError.transport(error)
+        }
+        guard let http = response as? HTTPURLResponse else {
+            throw UsageAPIError.http(-1)
+        }
+        guard http.statusCode == 200 else {
+            throw UsageAPIError.http(http.statusCode)
+        }
+        do {
+            let payload = try decoder.decode(BackendHeatmapResult.self, from: data)
+            return payload.toSnapshot()
+        } catch {
+            throw UsageAPIError.decode(error)
+        }
+    }
 }
 
 // MARK: - Backend payload (matches Go usage.QueryResult)
@@ -151,6 +217,68 @@ private struct BackendQueryResult: Decodable {
             series:   series.values.map(Double.init),
             labels:   series.labels,
             sessions: sessions
+        )
+    }
+}
+
+// MARK: - Backend heatmap payload (matches Go usage.HeatmapResult)
+
+private struct BackendHeatmapResult: Decodable {
+    struct Day: Decodable {
+        let date: String
+        let weekday: Int
+        let totalTokens: Int64
+        let costUSD: String
+        let requests: Int64
+        let isFuture: Bool
+
+        enum CodingKeys: String, CodingKey {
+            case date, weekday
+            case totalTokens = "total_tokens"
+            case costUSD     = "cost_usd"
+            case requests
+            case isFuture    = "is_future"
+        }
+    }
+    let tool: String
+    let weeks: Int
+    let startDate: String
+    let endDate: String
+    let today: String
+    let days: [Day]
+
+    enum CodingKeys: String, CodingKey {
+        case tool, weeks
+        case startDate = "start_date"
+        case endDate   = "end_date"
+        case today
+        case days
+    }
+
+    func toSnapshot() -> HeatmapSnapshot {
+        let df = DateFormatter()
+        df.calendar = Calendar(identifier: .gregorian)
+        df.locale = Locale(identifier: "en_US_POSIX")
+        df.timeZone = TimeZone(identifier: "Asia/Singapore")
+        df.dateFormat = "yyyy-MM-dd"
+
+        let mapped: [HeatmapDay] = days.map { d in
+            HeatmapDay(
+                id: d.date,
+                date: df.date(from: d.date) ?? .distantPast,
+                weekday: d.weekday,
+                totalTokens: Double(d.totalTokens),
+                cost: Double(d.costUSD) ?? 0,
+                requests: Int(d.requests),
+                isFuture: d.isFuture
+            )
+        }
+        return HeatmapSnapshot(
+            weeks: weeks,
+            startDate: df.date(from: startDate) ?? .distantPast,
+            endDate:   df.date(from: endDate)   ?? .distantPast,
+            today:     df.date(from: today)     ?? .distantPast,
+            days: mapped
         )
     }
 }

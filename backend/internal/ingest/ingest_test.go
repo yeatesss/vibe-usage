@@ -63,6 +63,20 @@ func TestService_ScanOnce_IngestClaude(t *testing.T) {
 	assert.GreaterOrEqual(t, stats.FilesScanned, 1)
 }
 
+func TestService_SetTick_RangeAndUpdate(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	svc := New(nil, nil, parser.Config{}, 30*time.Second, logger)
+
+	assert.Equal(t, 30*time.Second, svc.Tick())
+
+	require.Error(t, svc.SetTick(MinTick-time.Millisecond))
+	require.Error(t, svc.SetTick(MaxTick+time.Millisecond))
+	assert.Equal(t, 30*time.Second, svc.Tick(), "rejected updates must not change tick")
+
+	require.NoError(t, svc.SetTick(60*time.Second))
+	assert.Equal(t, 60*time.Second, svc.Tick())
+}
+
 func TestService_StatFastPath(t *testing.T) {
 	tmp := t.TempDir()
 	claudeDir := filepath.Join(tmp, ".claude", "projects", "demo")

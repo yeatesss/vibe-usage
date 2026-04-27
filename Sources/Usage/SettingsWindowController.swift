@@ -12,16 +12,26 @@ final class SettingsWindowController {
     func show() {
         if window == nil {
             let w = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 460, height: 320),
-                styleMask: [.titled, .closable, .fullSizeContentView],
+                contentRect: NSRect(x: 0, y: 0, width: 720, height: 540),
+                styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView],
                 backing: .buffered,
                 defer: false
             )
             w.title = ""
             w.titlebarAppearsTransparent = true
+            w.titleVisibility = .hidden
+            w.isMovableByWindowBackground = true
             w.isReleasedWhenClosed = false
+            w.backgroundColor = .clear
+            w.isOpaque = false
             w.center()
-            w.contentView = NSHostingView(rootView: SettingsView())
+
+            // Hosting view that lets the Liquid Glass surface render under
+            // the titlebar (which is transparent + full-size content).
+            let host = NSHostingView(rootView: SettingsView())
+            host.autoresizingMask = [.width, .height]
+            w.contentView = host
+
             window = w
         }
         NSApp.activate(ignoringOtherApps: true)

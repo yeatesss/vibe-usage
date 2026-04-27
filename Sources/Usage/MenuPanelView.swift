@@ -19,6 +19,8 @@ struct MenuPanelView: View {
     private var tabAnim: Animation { .spring(response: 0.38, dampingFraction: 0.85) }
     private var numAnim: Animation { .smooth(duration: 0.45) }
 
+    private let panelHeatmapWeeks = 15
+
     var body: some View {
         VStack(spacing: 0) {
             toolTabs
@@ -29,6 +31,9 @@ struct MenuPanelView: View {
                 hairline.padding(.horizontal, 16).padding(.top, 14)
 
                 breakdown.padding(.horizontal, 16).padding(.top, 4)
+                hairline.padding(.horizontal, 16).padding(.top, 14)
+
+                activityCard.padding(.horizontal, 16).padding(.top, 4)
                 hairline.padding(.horizontal, 16).padding(.top, 14)
 
                 actions.padding(.horizontal, 10).padding(.top, 2).padding(.bottom, 8)
@@ -44,6 +49,31 @@ struct MenuPanelView: View {
         )
         .task(id: tool.id) {
             await store.loadAll(tool: tool)
+            await store.loadHeatmap(tool: tool, weeks: panelHeatmapWeeks)
+        }
+    }
+
+    // MARK: Activity (heatmap)
+
+    private var activityCard: some View {
+        let snap = store.heatmap(tool: tool, weeks: panelHeatmapWeeks) ?? .empty
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(L.t("activity", locale: locale.current))
+                    .font(.system(size: 13, weight: .semibold))
+                Spacer()
+                Text(L.t("activitySub", locale: locale.current, params: ["weeks": "\(panelHeatmapWeeks)"]))
+                    .font(.system(size: 10))
+                    .foregroundStyle(Palette.ink.opacity(0.5))
+                    .lineLimit(1)
+            }
+            HeatmapView(
+                snapshot: snap,
+                accent: tool.accent,
+                metric: .cost,
+                size: .compact,
+                showsLegend: false
+            )
         }
     }
 
@@ -377,7 +407,6 @@ struct MenuPanelView: View {
             .buttonStyle(.plain)
             // TODO: 暂未实现，先屏蔽
             // ActionRow(icon: "square.and.arrow.up", label: L.t("exportCsv", locale: locale.current))
-            // ActionRow(icon: "bell",                label: L.t("budgets",   locale: locale.current))
             insetHairline
             Button {
                 MenuBarController.shared?.closePopover()

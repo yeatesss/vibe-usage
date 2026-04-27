@@ -12,21 +12,56 @@ struct StatsView: View {
     private var tabAnim: Animation { .spring(response: 0.38, dampingFraction: 0.85) }
     private var numAnim: Animation { .smooth(duration: 0.45) }
 
+    private let dashboardHeatmapWeeks = 52
+
     var body: some View {
         VStack(spacing: 0) {
             topBar
             subHeader
-            HStack(alignment: .top, spacing: 0) {
-                main
-                Divider()
-                sidebar
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(spacing: 0) {
+                    HStack(alignment: .top, spacing: 0) {
+                        main
+                        Divider()
+                        sidebar
+                    }
+                    heatmapSection
+                }
             }
         }
         .background(statsBackground)
         .foregroundStyle(Palette.ink)
         .task(id: tool.id) {
             await store.loadAll(tool: tool)
+            await store.loadHeatmap(tool: tool, weeks: dashboardHeatmapWeeks)
         }
+    }
+
+    // MARK: Heatmap section (full width, below main + sidebar)
+
+    private var heatmapSection: some View {
+        let snap = store.heatmap(tool: tool, weeks: dashboardHeatmapWeeks) ?? .empty
+        return VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(L.t("activity", locale: locale.current))
+                    .font(.system(size: 14, weight: .semibold))
+                Text(L.t("activitySub", locale: locale.current, params: ["weeks": "\(dashboardHeatmapWeeks)"]))
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(Palette.ink.opacity(0.55))
+            }
+            HeatmapView(snapshot: snap, accent: tool.accent, metric: .cost, size: .regular)
+        }
+        .padding(.horizontal, 18).padding(.vertical, 16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.white.opacity(0.55))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.8), lineWidth: 1)
+        )
+        .padding(.horizontal, 22).padding(.top, 8).padding(.bottom, 22)
     }
 
     // MARK: Background — same liquid-glass family

@@ -23,7 +23,9 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         configurePopover()
         configureStatusItem()
         Self.shared = self
+        SettingsStore.shared.applyOnLaunch()
         bindStatusItem()
+        bindSettings()
         startInitialLoad()
         startRefreshTimer()
     }
@@ -57,11 +59,39 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             .store(in: &cancellables)
     }
 
+    private func bindSettings() {
+        SettingsStore.shared.$refreshInterval
+            .dropFirst()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                self.startRefreshTimer()
+                Task { @MainActor [weak self] in
+                    await self?.syncTickToBackend()
+                }
+            }
+            .store(in: &cancellables)
+
+        SettingsStore.shared.$menuBarDisplay
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.refreshStatusTitle() }
+            .store(in: &cancellables)
+    }
+
     private func refreshStatusTitle() {
-        let claudeToday = store.cost(tool: .claude, range: .today)
-        let codexToday  = store.cost(tool: .codex,  range: .today)
-        let total = claudeToday + codexToday
-        statusItem.button?.title = String(format: " $%.2f", total)
+        guard let button = statusItem.button else { return }
+        switch SettingsStore.shared.menuBarDisplay {
+        case .iconOnly:
+            button.title = ""
+        case .todayCost:
+            let total = store.cost(tool: .claude, range: .today)
+                      + store.cost(tool: .codex,  range: .today)
+            button.title = String(format: " $%.2f", total)
+        case .tokens:
+            let total = (store.snapshot(tool: .claude, range: .today)?.metrics.total ?? 0)
+                      + (store.snapshot(tool: .codex,  range: .today)?.metrics.total ?? 0)
+            button.title = " " + Fmt.tokens(total)
+        }
     }
 
     private func startInitialLoad() {
@@ -71,14 +101,26 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             for attempt in 0..<10 {
                 await store.loadAll(tool: .claude)
                 await store.loadAll(tool: .codex)
-                if store.snapshot(tool: .claude, range: .today) != nil { return }
+                if store.snapshot(tool: .claude, range: .today) != nil {
+                    await syncTickToBackend()
+                    return
+                }
                 if attempt < 9 { try? await Task.sleep(nanoseconds: 300_000_000) }
             }
+            // Even if no snapshot landed (e.g. cold install with no usage),
+            // still push the preferred tick so the backend uses it next scan.
+            await syncTickToBackend()
         }
     }
 
+    private func syncTickToBackend() async {
+        await store.pushBackendTick(seconds: SettingsStore.shared.refreshInterval.seconds)
+    }
+
     private func startRefreshTimer() {
-        let timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+        refreshTimer?.invalidate()
+        let interval = SettingsStore.shared.refreshInterval.seconds
+        let timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
                 await self.store.load(tool: .claude, range: .today)

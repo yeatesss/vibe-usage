@@ -78,8 +78,10 @@ func TestEndToEnd_ClaudeLogToUsageAPI(t *testing.T) {
 	cancel()
 	<-ing.Done()
 
-	usgSvc := usage.NewService(st, calc, usage.NewFixedClock(time.Date(2026, 4, 22, 15, 30, 0, 0, usage.Location())))
-	router := httpapi.NewRouter(usgSvc, &stubHealth{store: st}, "e2e")
+	clock := usage.NewFixedClock(time.Date(2026, 4, 22, 15, 30, 0, 0, usage.Location()))
+	usgSvc := usage.NewService(st, calc, clock)
+	heatSvc := usage.NewHeatmapService(st, calc, clock)
+	router := httpapi.NewRouter(usgSvc, heatSvc, &stubHealth{store: st}, ing, "e2e")
 
 	ts := httptest.NewServer(router)
 	t.Cleanup(ts.Close)

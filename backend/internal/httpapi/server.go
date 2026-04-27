@@ -16,17 +16,28 @@ type UsageQuerier interface {
 	Query(tool, rangeName string) (*usage.QueryResult, error)
 }
 
+type HeatmapQuerier interface {
+	Query(tool string, weeks int) (*usage.HeatmapResult, error)
+}
+
 type HealthCheck interface {
 	StartedAt() time.Time
 	IsFirstPassDone() bool
 	LastIngestStats() map[string]any
 }
 
+// TickConfigurer exposes the ingest scan interval so the frontend can
+// keep it in sync with the user's "Refresh interval" preference.
+type TickConfigurer interface {
+	Tick() time.Duration
+	SetTick(time.Duration) error
+}
+
 // NewRouter creates a gin.Engine with all routes registered.
-func NewRouter(usg UsageQuerier, hc HealthCheck, version string) *gin.Engine {
+func NewRouter(usg UsageQuerier, hm HeatmapQuerier, hc HealthCheck, tc TickConfigurer, version string) *gin.Engine {
 	r := gin.New()
 	r.Use(gin.Recovery())
-	RegisterRoutes(r, usg, hc, version)
+	RegisterRoutes(r, usg, hm, hc, tc, version)
 	return r
 }
 

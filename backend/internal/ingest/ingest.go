@@ -4,12 +4,19 @@ package ingest
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"sync/atomic"
 	"time"
 
 	"github.com/yeatesss/vibe-usage/backend/internal/parser"
+)
+
+// MinTick / MaxTick bound the scan interval. Same range the CLI flag enforces.
+const (
+	MinTick = 10 * time.Second
+	MaxTick = 10 * time.Minute
 )
 
 // Store is the narrow sink interface this package depends on (DIP).
@@ -30,21 +37,53 @@ type Service struct {
 	store     Store
 	parsers   []parser.ToolParser
 	cfg       parser.Config
-	tick      time.Duration
+	tickNs    atomic.Int64  // current tick duration in nanoseconds; safe to read/write across goroutines.
+	tickReset chan struct{} // signal Run() to rebuild its ticker with the new value.
 	log       *slog.Logger
 	lastStats atomic.Pointer[ScanStats]
 	done      chan struct{}
 }
 
 func New(s Store, parsers []parser.ToolParser, cfg parser.Config, tick time.Duration, log *slog.Logger) *Service {
-	return &Service{
-		store: s, parsers: parsers, cfg: cfg, tick: tick, log: log,
-		done: make(chan struct{}),
+	svc := &Service{
+		store:     s,
+		parsers:   parsers,
+		cfg:       cfg,
+		log:       log,
+		done:      make(chan struct{}),
+		tickReset: make(chan struct{}, 1),
 	}
+	svc.tickNs.Store(int64(tick))
+	return svc
 }
 
 func (s *Service) Done() <-chan struct{} { return s.done }
 func (s *Service) LastStats() *ScanStats { return s.lastStats.Load() }
+
+// Tick returns the current scan interval.
+func (s *Service) Tick() time.Duration {
+	return time.Duration(s.tickNs.Load())
+}
+
+// SetTick updates the scan interval. The change takes effect on the next
+// ticker rebuild, which is signalled non-blockingly via tickReset. Returns
+// an error for out-of-range values.
+func (s *Service) SetTick(d time.Duration) error {
+	if d < MinTick || d > MaxTick {
+		return fmt.Errorf("tick must be between %s and %s; got %s", MinTick, MaxTick, d)
+	}
+	old := time.Duration(s.tickNs.Swap(int64(d)))
+	if old == d {
+		return nil
+	}
+	// Non-blocking signal — buffered cap 1 means we coalesce rapid changes.
+	select {
+	case s.tickReset <- struct{}{}:
+	default:
+	}
+	s.log.Info("ingest.tick.updated", "old", old.String(), "new", d.String())
+	return nil
+}
 
 // Run blocks until ctx is cancelled. Closes Done() on return.
 func (s *Service) Run(ctx context.Context) error {
@@ -55,16 +94,25 @@ func (s *Service) Run(ctx context.Context) error {
 		s.log.Error("ingest.first_pass_mark_failed", "err", err)
 	}
 
-	t := time.NewTicker(s.tick)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-t.C:
-			s.scanOnce(ctx)
+	for ctx.Err() == nil {
+		d := time.Duration(s.tickNs.Load())
+		t := time.NewTicker(d)
+
+	loop:
+		for {
+			select {
+			case <-ctx.Done():
+				t.Stop()
+				return ctx.Err()
+			case <-s.tickReset:
+				t.Stop()
+				break loop // rebuild ticker with the new tick value
+			case <-t.C:
+				s.scanOnce(ctx)
+			}
 		}
 	}
+	return ctx.Err()
 }
 
 func (s *Service) scanOnce(ctx context.Context) {
