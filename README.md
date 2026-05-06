@@ -4,7 +4,6 @@
 
 [中文文档 / Chinese README](docs/README_zh.md)
 
-![Full stats window](docs/img/longshot20260423045337.png)
 
 ---
 
@@ -19,20 +18,27 @@ Everything runs locally. No account, no API keys, no network calls beyond `local
 
 ### Features
 
-- **Menu bar popover** — at-a-glance totals for today / this week / this month / this year.
-- **Full stats window** — hourly & daily bar charts, token breakdown (input, output, cache read, cache write), per-request averages, cost trends.
-- **Per-project view** — switch between Overview and Projects tabs; filter the dashboard with one click via the project chip strip, or drill into a single repo for cost, tokens, requests and per-branch breakdown.
-- **Dual tool support** — switch between Claude Code and Codex; see per-tool pricing (`$3/$15 per 1M` for Claude, `$1.25/$10 per 1M` for Codex) with cache discounts applied.
-- **Incremental ingestion** — the Go backend watches log files and only processes the delta since last tick.
-- **Self-contained `.app`** — the Swift UI bundles the Go backend binary; there is nothing to install separately.
+- **Menu bar popover** — at-a-glance totals for today / this week / this month / this year, with a Cost ⇄ Tokens hero toggle and an inline sparkline.
+- **Full stats window** — hourly & daily stacked bar charts, token breakdown (input, output, cache read, cache write), per-request averages, cost trends, and a 52-week GitHub-style **activity heatmap**.
+- **Per-project view** — switch between Overview and Projects tabs; filter the dashboard with one click via the project chip strip, or drill into a single repo with searchable / sortable master-detail (by cost, tokens, requests, recency or name), per-branch breakdown, and a one-click copy of the project path.
+- **Dual tool support** — switch between Claude Code and Codex; see per-tool pricing (`$3 / $15 per 1M` for Claude with 90% cache discount, `$1.25 / $10 per 1M` for Codex with `$0.125` cached input) calculated automatically.
+- **Incremental ingestion** — the Go backend watches log files and only processes the delta since the last tick, configurable from 30s / 1m / 5m.
+- **Bilingual UI** — English / 中文, switchable in Preferences.
+- **Configurable menu bar** — show icon only, today's cost, or token total; choose System / Light / Dark theme; launch at login.
+- **Keyboard-friendly** — `⌘1` Overview, `⌘2` Projects, `Esc` clear filter, `⌘⇧U` open dashboard, `⌘,` preferences, `⌘Q` quit.
+- **Self-contained `.app`** — the SwiftUI bundle ships the Go backend binary; nothing else to install.
 
 ---
 
 ## Screenshots
 
-| Menu bar popover | Full stats window |
+| Menu bar — Claude Code | Menu bar — Codex |
 |---|---|
-| <img src="docs/img/longshot20260423045442.png" width="260" /> | <img src="docs/img/longshot20260423045337.png" width="520" /> |
+| <img src="docs/img/tooltip_claude_en.png" width="280" /> | <img src="docs/img/tooltip_codex_en.png" width="280" /> |
+
+Full dashboard:
+
+<img src="docs/img/dashboard_en.png" width="780" />
 
 ---
 
@@ -113,8 +119,8 @@ Run `make help` for the full list.
                                                (SQLite + runtime.json)
 ```
 
-- **Frontend** (`Sources/Usage/`, Swift 6.2 / SwiftUI, macOS 26+): menu bar controller, popover, full stats window, Swift Charts rendering.
-- **Backend** (`backend/`, Go 1.25, Gin + modernc SQLite): tails session logs, normalizes per-tool event shapes, computes cost from `pricing/`, exposes `/usage`, `/health`, `/version`.
+- **Frontend** (`Sources/Usage/`, Swift 6.2 / SwiftUI, macOS 26+): menu bar controller, popover, full stats window, project master-detail, settings window, Swift Charts rendering, activity heatmap.
+- **Backend** (`backend/`, Go 1.25, Gin + modernc SQLite): tails session logs, normalizes per-tool event shapes, computes cost from `pricing/`, exposes `/usage`, `/usage/heatmap`, `/usage/projects`, `/health`, `/version`, `/config/tick`.
 - **IPC**: the backend writes a `runtime.json` with port + pid into the data dir; the app reads it to connect. In packaged mode the Swift app spawns the bundled backend binary; in `make dev` the backend is run separately and the spawn is skipped.
 
 Data directory (override with `VIBEUSAGE_DATA_DIR`):
@@ -130,7 +136,9 @@ Data directory (override with `VIBEUSAGE_DATA_DIR`):
 
 ## Configuration
 
-The backend picks up these environment variables and flags:
+Most settings live in **Preferences** (`⌘,`) — language, refresh interval (30s / 1m / 5m), launch at login, menu bar display, theme, and data-source connectivity.
+
+The backend also picks up these environment variables and flags:
 
 | Variable | Flag | Default |
 |---|---|---|
