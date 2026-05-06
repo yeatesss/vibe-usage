@@ -123,12 +123,24 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         let timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
-                await self.store.load(tool: .claude, range: .today)
-                await self.store.load(tool: .codex,  range: .today)
+                await self.refreshAllRanges()
             }
         }
         RunLoop.main.add(timer, forMode: .common)
         refreshTimer = timer
+    }
+
+    /// Refresh every range for both tools so menu panel cards, dashboard
+    /// "All Periods" sidebar, and the active range view all stay in sync.
+    /// When a project is selected on the dashboard, also refresh that
+    /// project's per-range snapshots so the filtered view doesn't lag.
+    private func refreshAllRanges() async {
+        await store.loadAll(tool: .claude)
+        await store.loadAll(tool: .codex)
+        if let cwd = store.selectedProject {
+            await store.loadAll(tool: .claude, project: cwd)
+            await store.loadAll(tool: .codex,  project: cwd)
+        }
     }
 
     private func barChartIcon() -> NSImage {
